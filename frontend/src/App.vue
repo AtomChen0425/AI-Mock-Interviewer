@@ -5,16 +5,12 @@ import SetupForm from './components/SetupForm.vue';
 import ProfileEditor from './components/ProfileEditor.vue';
 import InterviewChat from './components/InterviewChat.vue';
 import FeedbackReport from './components/FeedbackReport.vue';
-// ⚠️ 修改点 1：把原来从 geminiService 引入的方法，改为从你新建的 apiService 引入
 import { analyzeResume } from './services/apiService'; 
 import type { UserProfile } from './types';
-// ⚠️ 修改点 2：删除 import type { Chat } from '@google/genai';
 
 type AppState = 'setup' | 'interview' | 'feedback' | 'profile';
 
 const appState = ref<AppState>('setup');
-// ⚠️ 修改点 3：删除 const chatInstance = ref<Chat | null>(null);
-// 新增 interviewType 用于传递给 Chat 组件
 const interviewType = ref(''); 
 
 const chatHistory = ref<{ role: string; text: string }[]>([]);
@@ -24,16 +20,20 @@ const isStarting = ref(false);
 const loadingStep = ref('');
 
 function formatProfileForAI(profile: UserProfile): string {
-  // ... (保留原有的格式化逻辑不变)
   let text = `Name: ${profile.name}\nEmail: ${profile.email}\nPhone: ${profile.phone}\n\n`;
   text += `Summary:\n${profile.summary}\n\n`;
   text += `Skills:\n${profile.skills}\n\n`;
   
   text += `Work Experience:\n`;
-  profile.experience.forEach(exp => {
+  profile.workexperience.forEach(exp => {
     text += `- ${exp.title} at ${exp.company} (${exp.location}) | ${exp.startDate} - ${exp.endDate} | ${exp.type}\n  ${exp.description}\n`;
   });
   
+  text += `\nProject Experience:\n`;
+  profile.projectexperience.forEach(proj => {
+    text += `- ${proj.title}\n | ${proj.startDate} - ${proj.endDate} | ${proj.description}\n`;
+  });
+
   text += `\nEducation:\n`;
   profile.education.forEach(edu => {
     text += `- ${edu.degree} in ${edu.field} from ${edu.school} | ${edu.startDate} - ${edu.endDate}\n`;
@@ -54,12 +54,9 @@ const handleStart = async (j: string, type: string) => {
     const profileText = formatProfileForAI(profile);
     
     loadingStep.value = 'Analyzing Profile vs Job Description...';
-    // ⚠️ 修改点 4：这里的 analyzeResume 现在是一个发向 FastAPI 的 HTTP 请求
     const context = await analyzeResume(profileText, j); 
     
     resumeContext.value = context;
-    
-    // ⚠️ 修改点 5：不再在这里创建 startInterviewChat，直接切换状态即可
     loadingStep.value = 'Preparing Interviewer...';
     appState.value = 'interview';
     

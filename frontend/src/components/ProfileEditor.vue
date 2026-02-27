@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Plus, Trash2, UploadCloud, Save, Loader2, User, Briefcase, GraduationCap } from 'lucide-vue-next';
+import { Plus, Trash2, UploadCloud, Save, Loader2, User, Briefcase, GraduationCap,Component  } from 'lucide-vue-next';
 import type { UserProfile, WorkExperience, Education } from '../types';
 import { parseResumeToProfile } from '../services/apiService';
 
@@ -9,7 +9,7 @@ const emit = defineEmits<{
 }>();
 
 const emptyProfile: UserProfile = {
-  name: '', email: '', phone: '', summary: '', skills: '', experience: [], education: []
+  name: '', email: '', phone: '', summary: '', skills: '', workexperience: [], projectexperience: [], education: []
 };
 
 const profile = ref<UserProfile>(JSON.parse(JSON.stringify(emptyProfile)));
@@ -49,12 +49,20 @@ const handleFileUpload = async (e: Event) => {
   reader.readAsDataURL(file);
 };
 
-const addExperience = () => {
-  profile.value.experience.push({ id: Math.random().toString(), title: '', company: '', location: '', startDate: '', endDate: '', type: '', description: '' });
+const addWorkExperience = () => {
+  profile.value.workexperience.push({ id: Math.random().toString(), title: '', company: '', location: '', startDate: '', endDate: '', type: '', description: '' });
 };
 
-const removeExperience = (id: string) => {
-  profile.value.experience = profile.value.experience.filter(exp => exp.id !== id);
+const removeWorkExperience = (id: string) => {
+  profile.value.workexperience = profile.value.workexperience.filter(exp => exp.id !== id);
+};
+
+const addProjectExperience = () => {
+  profile.value.projectexperience.push({ id: Math.random().toString(), title: '', startDate: '', endDate: '', description: '' });
+};
+
+const removeProjectExperience = (id: string) => {
+  profile.value.projectexperience = profile.value.projectexperience.filter(exp => exp.id !== id);
 };
 
 const addEducation = () => {
@@ -132,12 +140,12 @@ const removeEducation = (id: string) => {
           <h3 class="text-xl font-bold text-gray-900 flex items-center">
             <Briefcase class="w-5 h-5 mr-2 text-indigo-500" /> Work Experience
           </h3>
-          <button @click="addExperience" class="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
+          <button @click="addWorkExperience" class="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
             <Plus class="w-5 h-5" />
           </button>
         </div>
         <div class="space-y-8">
-          <div v-for="exp in profile.experience" :key="exp.id" class="relative pl-6 border-l-2 border-gray-100 pb-6 last:pb-0">
+          <div v-for="exp in profile.workexperience" :key="exp.id" class="relative pl-6 border-l-2 border-gray-100 pb-6 last:pb-0">
             <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-indigo-500"></div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -170,14 +178,54 @@ const removeEducation = (id: string) => {
                 <textarea rows="4" v-model="exp.description" class="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
               </div>
             </div>
-            <button @click="removeExperience(exp.id)" class="absolute top-0 right-0 p-2 text-gray-400 hover:text-red-500 transition-colors">
+            <button @click="removeWorkExperience(exp.id)" class="absolute bottom-0 right-0 p-2 text-gray-400 hover:text-red-500 transition-colors">
               <Trash2 class="w-4 h-4" />
             </button>
           </div>
-          <p v-if="profile.experience.length === 0" class="text-sm text-gray-500 italic">No work experience added yet.</p>
+          <p v-if="profile.workexperience.length === 0" class="text-sm text-gray-500 italic">No work experience added yet.</p>
         </div>
       </div>
 
+      <!-- Project Experience -->
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-xl font-bold text-gray-900 flex items-center">
+            <Component class="w-5 h-5 mr-2 text-indigo-500" /> Project Experience
+          </h3>
+          <button @click="addProjectExperience" class="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
+            <Plus class="w-5 h-5" />
+          </button>
+        </div>
+        <div class="space-y-8">
+          <div v-for="exp in profile.projectexperience" :key="exp.id" class="relative pl-6 border-l-2 border-gray-100 pb-6 last:pb-0">
+            <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-indigo-500"></div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Job Title</label>
+                <input type="text" v-model="exp.title" class="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
+                  <input type="text" placeholder="e.g. Jan 2020" v-model="exp.startDate" class="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-gray-500 mb-1">End Date</label>
+                  <input type="text" placeholder="e.g. Present" v-model="exp.endDate" class="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <div class="md:col-span-2">
+                <label class="block text-xs font-medium text-gray-500 mb-1">Description</label>
+                <textarea rows="4" v-model="exp.description" class="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
+              </div>
+            </div>
+            <button @click="removeProjectExperience(exp.id)" class="absolute bottom-0 right-0 p-2 text-gray-400 hover:text-red-500 transition-colors">
+              <Trash2 class="w-4 h-4" />
+            </button>
+          </div>
+          <p v-if="profile.projectexperience.length === 0" class="text-sm text-gray-500 italic">No project experience added yet.</p>
+        </div>
+      </div>
       <!-- Education -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
         <div class="flex items-center justify-between mb-6">

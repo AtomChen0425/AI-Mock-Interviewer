@@ -75,6 +75,11 @@ def text_to_speech(request: TTSRequest):
 async def parse_resume(request: ParseResumeRequest):
     """解析简历文本，提取结构化信息 (使用 JSON Schema 输出)"""
     prompt = """
+    You are an expert technical recruiter. Parse the attached resume and extract the information into a structured JSON format.
+    Extract the candidate's name, email, phone, a brief professional summary, a comma-separated list of skills, their work experience, project experience, and education.
+    For work experience, include title, company, location, startDate, endDate, type (e.g., Full-time, Internship), and a detailed description (bullet points preferred).
+    For project experience, include title, startDate, endDate, and description.
+    For education, include school, degree, field of study, startDate, and endDate.
     Extract the following information from the provided resume text and return it as a structured JSON object. 
     Use exactly this schema:
     {
@@ -83,8 +88,11 @@ async def parse_resume(request: ParseResumeRequest):
       "phone": "string",
       "summary": "string",
       "skills": "string (comma separated)",
-      "experience": [
+      "workexperience": [
         {"title": "string", "company": "string", "location": "string", "startDate": "string", "endDate": "string", "type": "string", "description": "string"}
+      ],
+      "projectexperience": [
+        {"title": "string", "startDate": "string", "endDate": "string", "description": "string"}
       ],
       "education": [
         {"degree": "string", "field": "string", "school": "string", "startDate": "string", "endDate": "string"}
@@ -92,16 +100,24 @@ async def parse_resume(request: ParseResumeRequest):
     }
     
     Resume Text:
-    """ + request.message
+    """ 
 
     try:
-        response = client.models.generate_content(
+        file_bytes = base64.b64decode(request.message)
+        
+        document_part = types.Part.from_bytes(
+            data=file_bytes,
+            mime_type=request.mimeType,
+        )
+
+        response = await client.aio.models.generate_content(
             model='gemini-2.5-flash',
-            contents=prompt,
+            contents=[document_part, prompt],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
             )
         )
+        # print(f"Raw response from model: {response.text}")  # Debug log to see the raw response
         return json.loads(response.text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

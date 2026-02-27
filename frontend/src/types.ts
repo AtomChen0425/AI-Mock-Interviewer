@@ -8,7 +8,13 @@ export interface WorkExperience {
   type: string;
   description: string;
 }
-
+export interface ProjectExperience {
+  id: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  description: string;
+}
 export interface Education {
   id: string;
   school: string;
@@ -24,6 +30,7 @@ export interface UserProfile {
   phone: string;
   summary: string;
   skills: string;
-  experience: WorkExperience[];
+  workexperience: WorkExperience[];
+  projectexperience: ProjectExperience[];
   education: Education[];
 }

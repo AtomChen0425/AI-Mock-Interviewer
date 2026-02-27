@@ -34,7 +34,6 @@ export async function generateSpeech(text: string): Promise<string | null> {
 // ---------------------------------------------------------------------------
 export async function parseResumeToProfile(fileData: string, mimeType: string): Promise<UserProfile | null> {
   try {
-    // ⚠️ 修正：改用专属的路由名称
     const response = await fetch(`${API_BASE_URL}/parse-resume`, {
       method: 'POST',
       headers: {
