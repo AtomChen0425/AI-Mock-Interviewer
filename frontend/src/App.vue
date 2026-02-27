@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Bot, UserCircle } from 'lucide-vue-next';
+import { Bot, UserCircle, Clock } from 'lucide-vue-next';
 import SetupForm from './components/SetupForm.vue';
 import ProfileEditor from './components/ProfileEditor.vue';
 import InterviewChat from './components/InterviewChat.vue';
 import FeedbackReport from './components/FeedbackReport.vue';
+import HistoryList from './components/HistoryList.vue';
 import { analyzeResume } from './services/apiService'; 
-import type { UserProfile } from './types';
+import type { UserProfile, InterviewRecord } from './types';
 
-type AppState = 'setup' | 'interview' | 'feedback' | 'profile';
+type AppState = 'setup' | 'interview' | 'feedback' | 'profile' | 'history';
 
 const appState = ref<AppState>('setup');
 const interviewType = ref(''); 
@@ -18,7 +19,7 @@ const resumeContext = ref('');
 const jd = ref('');
 const isStarting = ref(false);
 const loadingStep = ref('');
-
+const currentRecordId = ref('');
 function formatProfileForAI(profile: UserProfile): string {
   let text = `Name: ${profile.name}\nEmail: ${profile.email}\nPhone: ${profile.phone}\n\n`;
   text += `Summary:\n${profile.summary}\n\n`;
@@ -70,16 +71,35 @@ const handleStart = async (j: string, type: string) => {
 };
 
 const handleInterviewComplete = (history: { role: string; text: string }[]) => {
-  chatHistory.value = history;
+  const newRecord: InterviewRecord = {
+    id: Math.random().toString(36).substring(2, 15),
+    date: new Date().toISOString(),
+    jobDescription: jd.value,
+    type: interviewType.value,
+    resumeContext: resumeContext.value,
+    chatHistory: history,
+  };
+  
+  const saved = localStorage.getItem('interviewHistory');
+  const records = saved ? JSON.parse(saved) : [];
+  records.push(newRecord);
+  localStorage.setItem('interviewHistory', JSON.stringify(records));
+  
+  currentRecordId.value = newRecord.id;
   appState.value = 'feedback';
 };
 
+const handleViewHistory = (id: string) => {
+  currentRecordId.value = id;
+  appState.value = 'feedback';
+};
 const handleRestart = () => {
   appState.value = 'setup';
   interviewType.value = '';
   chatHistory.value = [];
   resumeContext.value = '';
   jd.value = '';
+  currentRecordId.value = '';
 };
 </script>
 
@@ -103,6 +123,13 @@ const handleRestart = () => {
             Interview
           </button>
           <button 
+            @click="appState = 'history'"
+            :class="['flex items-center text-sm font-medium transition-colors', appState === 'history' ? 'text-indigo-600' : 'text-gray-500 hover:text-gray-900']"
+          >
+            <Clock class="w-4 h-4 mr-1" />
+            History
+          </button>
+          <button 
             @click="appState = 'profile'"
             :class="['flex items-center text-sm font-medium transition-colors', appState === 'profile' ? 'text-indigo-600' : 'text-gray-500 hover:text-gray-900']"
           >
@@ -124,7 +151,7 @@ const handleRestart = () => {
       </div>
       
       <ProfileEditor v-if="appState === 'profile'" @save="appState = 'setup'" />
-
+        <HistoryList v-if="appState === 'history'" @view="handleViewHistory" />
         <InterviewChat 
           v-if="appState === 'interview'" 
           :resumeContext="resumeContext"
@@ -135,6 +162,7 @@ const handleRestart = () => {
 
         <FeedbackReport
           v-if="appState === 'feedback'"
+          :recordId="currentRecordId"
           :chatHistory="chatHistory"
           :resume="resumeContext"
           :jobDescription="jd"

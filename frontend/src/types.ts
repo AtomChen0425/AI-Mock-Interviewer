@@ -34,3 +34,12 @@ export interface UserProfile {
   projectexperience: ProjectExperience[];
   education: Education[];
 }
+export interface InterviewRecord {
+  id: string;
+  date: string;
+  jobDescription: string;
+  type: string;
+  resumeContext: string;
+  chatHistory: { role: string; text: string }[];
+  feedbackHtml?: string;
+}
