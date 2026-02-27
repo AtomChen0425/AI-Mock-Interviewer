@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 
 load_dotenv()
-
+gemini_model = "gemini-2.5-flash"  # or "gemini-2.5-pro" for more advanced capabilities
 client = genai.Client() 
 
 app = FastAPI()
@@ -62,8 +62,6 @@ def text_to_speech(request: TTSRequest):
         tts.write_to_fp(fp)
         fp.seek(0)
         audio_base64 = base64.b64encode(fp.read()).decode('utf-8')
-        
-        # ⚠️ 修改这里：返回一个标准的 JSON 字典
         return {"audio": audio_base64} 
         
     except Exception as e:
@@ -73,7 +71,7 @@ def text_to_speech(request: TTSRequest):
 
 @app.post("/api/parse-resume")
 async def parse_resume(request: ParseResumeRequest):
-    """解析简历文本，提取结构化信息 (使用 JSON Schema 输出)"""
+    """parse the resume text and extract structured information about the candidate's profile, including their name, contact details, skills, work experience, project experience, and education history. The response should be a well-structured JSON object that can be easily consumed by the frontend for display and further analysis."""
     prompt = """
     You are an expert technical recruiter. Parse the attached resume and extract the information into a structured JSON format.
     Extract the candidate's name, email, phone, a brief professional summary, a comma-separated list of skills, their work experience, project experience, and education.
@@ -111,7 +109,7 @@ async def parse_resume(request: ParseResumeRequest):
         )
 
         response = await client.aio.models.generate_content(
-            model='gemini-2.5-flash',
+            model=gemini_model,
             contents=[document_part, prompt],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -139,7 +137,7 @@ async def analyze_resume(request: AnalyzeResumeRequest):
     """
     try:
         response = await client.aio.models.generate_content(
-            model='gemini-2.5-flash',
+            model=gemini_model,
             contents=prompt
         )
         return response.text
@@ -186,7 +184,7 @@ async def interview_chat(request: ChatRequest):
             formatted_history.append(content)
         
         chat = client.aio.chats.create(
-            model="gemini-2.5-pro",
+            model=gemini_model,
             config=config,
             history=formatted_history
         )
