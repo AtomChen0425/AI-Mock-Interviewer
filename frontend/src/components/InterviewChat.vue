@@ -32,7 +32,6 @@ const recognitionRef = ref<any>(null);
 const audioContextRef = ref<AudioContext | null>(null);
 const currentAudioSourceRef = ref<AudioBufferSourceNode | null>(null);
 
-// ⚠️ 修改点 4：计算属性，仅用于在 UI 上展示不隐藏的消息
 const visibleMessages = computed(() => messages.value.filter(m => !m.hidden));
 
 const scrollToBottom = () => {
@@ -196,7 +195,7 @@ const handleSubmit = async (e?: Event) => {
   stopAudio();
 
   const userMessage = input.value;
-  // 获取加上新消息前的历史记录
+
   const currentHistory = getApiHistory(); 
 
   messages.value.push({ role: 'user', text: userMessage });
@@ -204,7 +203,6 @@ const handleSubmit = async (e?: Event) => {
   isLoading.value = true;
 
   try {
-    // ⚠️ 修改点 6：调用后端接口
     const responseText = await sendInterviewMessage(
       props.resumeContext,
       props.jobDescription,
@@ -230,10 +228,8 @@ const handleComplete = async () => {
     const finishMessage = "I would like to finish the interview now. Please provide your final feedback.";
     const currentHistory = getApiHistory();
 
-    // 同样，将结束指令标记为 hidden
     messages.value.push({ role: 'user', text: finishMessage, hidden: true });
 
-    // ⚠️ 修改点 7：调用后端接口
     const responseText = await sendInterviewMessage(
       props.resumeContext,
       props.jobDescription,
@@ -246,7 +242,6 @@ const handleComplete = async () => {
     await playAudio(responseText);
     
     setTimeout(() => {
-      // 传递完整的 messages（包括 hidden），方便 FeedbackReport 全面评估
       emit('complete', messages.value);
     }, 2000);
   } catch (error) {
