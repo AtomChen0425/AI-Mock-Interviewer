@@ -15,7 +15,7 @@ echo 🚀 [1/3] Initializing startup process...
 echo 📦 [2/3] Starting FastAPI backend...
 if exist "backend\" (
     cd backend
-    start  cmd /k "title FastAPI Backend && activate NewFlask && uvicorn main:app --reload --port 8000"
+    start  cmd /k "title FastAPI Backend && uvicorn main:app --reload --port 8000"
     cd ..
 ) else (
     echo ❌ Error: cannot find backend folder!
