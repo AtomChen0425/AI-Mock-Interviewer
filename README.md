@@ -20,7 +20,7 @@ AI Mock Interviewer is a full-stack web application designed to help job seekers
 
 ### Backend
 * **Framework**: Python + FastAPI
-* **AI Models**: Google GenAI SDK (`gemini-2.5-flash` for chat/parsing, `gemini-2.5-pro` for detailed feedback)
+* **AI Models**: Google GenAI SDK 
 * **Text-to-Speech**: gTTS (Google Text-to-Speech)
 * **Environment**: python-dotenv
 
