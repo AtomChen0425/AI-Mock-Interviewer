@@ -3,7 +3,99 @@ import type { UserProfile } from "../types";
 const API_BASE_URL = 'http://localhost:8000/api';
 
 // ---------------------------------------------------------------------------
-// 1. 语音生成 (Text-to-Speech)
+// 0. 鉴权与通用请求封装
+// ---------------------------------------------------------------------------
+
+// 获取本地存储的 JWT Token
+export const getToken = () => localStorage.getItem('authToken');
+
+// 封装带有 Authorization 请求头的 fetch
+async function fetchWithAuth(url: string, options: RequestInit = {}) {
+  const token = getToken();
+  
+  // 合并 headers
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  return fetch(url, { ...options, headers });
+}
+
+// ---------------------------------------------------------------------------
+// 1. Google 登录与支付管理
+// ---------------------------------------------------------------------------
+
+// 验证 Google Token 并换取后端 JWT Token 与剩余额度
+export async function loginWithGoogle(credential: string): Promise<{token: string, quota: number} | null> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: credential })
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      localStorage.setItem('authToken', data.token); // 保存 Token 到本地
+      return data;
+    }
+    return null;
+  } catch (error) {
+    console.error("Google login error:", error);
+    return null;
+  }
+}
+
+// 查询当前用户的最新 Quota
+export async function getUserQuota(): Promise<number | null> {
+  try {
+    const response = await fetchWithAuth(`${API_BASE_URL}/user/quota`, {
+      method: 'GET'
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      return data.quota;
+    }
+    return null; // 如果返回 401，说明 Token 过期或无效
+  } catch (error) {
+    console.error("Failed to fetch quota:", error);
+    return null;
+  }
+}
+
+// 清除本地 Token
+export function logoutUser() {
+  localStorage.removeItem('authToken');
+}
+// 获取 支付链接
+export async function getPaymentUrl(provider: 'stripe' | 'paypal', amount: number): Promise<string | null> {
+  try {
+    const response = await fetchWithAuth(`${API_BASE_URL}/create-checkout-session`, { 
+      method: 'POST',
+      body: JSON.stringify({ 
+        provider: provider, 
+        amount: amount 
+      })
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      return data.url;
+    }
+    return null;
+  } catch (error) {
+    console.error("Payment URL error:", error);
+    return null;
+  }
+}
+// ---------------------------------------------------------------------------
+// 1. (Text-to-Speech)
 // ---------------------------------------------------------------------------
 export async function generateSpeech(text: string): Promise<string | null> {
   try {
@@ -17,10 +109,10 @@ export async function generateSpeech(text: string): Promise<string | null> {
         }),
     });
     
-    // ⚠️ 修改这里：解析 JSON 并获取 audio 属性
+
     if (response.ok) {
         const data = await response.json();
-        return data.audio; // 拿到纯净的 Base64 字符串
+        return data.audio; 
     }
     return null;
   } catch (e) {
@@ -30,7 +122,7 @@ export async function generateSpeech(text: string): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// 2. 解析简历文件为结构化数据 (Profile)
+// 2.  (Profile)
 // ---------------------------------------------------------------------------
 export async function parseResumeToProfile(fileData: string, mimeType: string): Promise<UserProfile | null> {
   try {
@@ -79,14 +171,17 @@ export async function analyzeResume(profileText: string, jobDescription: string)
     });
   
     if (!response.ok) {
+      // 如果后端返回 403 错误（代表额度不足），抛出专属异常让 App.vue 弹窗处理
+      if (response.status === 403) {
+        throw new Error("QuotaExceeded");
+      }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    // 假设 FastAPI 直接返回纯文本结果。如果是 JSON {"result": "..."}, 请改为 await response.json()
     return await response.text(); 
   } catch (e) {
     console.error("Resume analysis failed:", e);
-    return "Resume analysis failed. Please check backend connection.";
+    throw e; // 抛出让前端捕获
   }
 }
 

@@ -1,7 +1,8 @@
+import os
 import base64
 import json
 from io import BytesIO
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException,Depends, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
@@ -9,8 +10,39 @@ from dotenv import load_dotenv
 from gtts import gTTS
 from google import genai
 from google.genai import types
-
+import jwt
+import stripe
+import requests
+from motor.motor_asyncio import AsyncIOMotorClient
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 load_dotenv()
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+JWT_SECRET = os.getenv("JWT_SECRET")
+DOMAIN_URL = os.getenv("DOMAIN_URL")
+MONGODB_URL = os.getenv("MONGODB_URL")
+# Stripe 配置
+STRIPE_api_key = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+# PayPal 配置
+PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID")
+PAYPAL_SECRET = os.getenv("PAYPAL_SECRET")
+PAYPAL_MODE = os.getenv("PAYPAL_MODE", "sandbox")
+PAYPAL_BASE_URL = "https://api-m.paypal.com" if PAYPAL_MODE == "live" else "https://api-m.sandbox.paypal.com"
+
+# --- MongoDB 初始化 ---
+mongo_client = AsyncIOMotorClient(MONGODB_URL)
+db = mongo_client.AI_interviewer
+users_collection = db.users     
+ip_logs_collection = db.ip_logs 
+
+async def init_db_indexes():
+    await users_collection.create_index("google_id", unique=True)
+    await users_collection.create_index("email", unique=True)
+    await ip_logs_collection.create_index("ip_address", unique=True)
+
 gemini_model = "gemini-2.5-flash"  # or "gemini-2.5-pro" for more advanced capabilities
 client = genai.Client() 
 
@@ -54,6 +86,228 @@ class FeedbackRequest(BaseModel):
     jobDescription: str
     chatHistory: List[FeedbackHistoryItem]
 
+# --- 辅助函数 ---
+class GoogleAuthRequest(BaseModel):
+    token: str
+
+class PaymentRequest(BaseModel):
+    provider: str  # "stripe" or "paypal"
+    amount: int    # 1 或 5
+async def get_current_user(authorization: str = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+    token = authorization.split(" ")[1]
+    try:
+        print(JWT_SECRET)
+        print(token)
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        google_id = payload.get("sub")
+        user = await users_collection.find_one({"google_id": google_id})
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+def get_client_ip(request: Request):
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host
+
+def get_paypal_access_token():
+    auth = (PAYPAL_CLIENT_ID, PAYPAL_SECRET)
+    headers = {"Accept": "application/json", "Accept-Language": "en_US"}
+    data = {"grant_type": "client_credentials"}
+    response = requests.post(f"{PAYPAL_BASE_URL}/v1/oauth2/token", auth=auth, headers=headers, data=data)
+    response.raise_for_status()
+    return response.json()["access_token"]
+
+# ==========================================
+# 鉴权 API
+# ==========================================
+@app.get("/api/user/quota")
+async def get_user_quota(current_user: dict = Depends(get_current_user)):
+    """获取当前登录用户的最新面试额度"""
+    # current_user 是从 MongoDB 查询返回的字典
+    return {"quota": current_user.get("quota", 0)}
+@app.post("/api/auth/google")
+async def google_auth(req: GoogleAuthRequest, request: Request):
+    try:
+        idinfo = id_token.verify_oauth2_token(req.token, google_requests.Request(), GOOGLE_CLIENT_ID)
+        google_id = idinfo['sub']
+        email = idinfo['email']
+        client_ip = get_client_ip(request)
+
+        user = await users_collection.find_one({"google_id": google_id})
+        is_new_user = False
+        
+        if not user:
+            user = {"google_id": google_id, "email": email, "quota": 0}
+            await users_collection.insert_one(user)
+            is_new_user = True
+
+        ip_log = await ip_logs_collection.find_one({"ip_address": client_ip})
+        
+        if is_new_user:
+            if not ip_log or not ip_log.get("used_free_tier", False):
+                await users_collection.update_one({"google_id": google_id}, {"$inc": {"quota": 1}})
+                user["quota"] += 1
+                
+                if not ip_log:
+                    await ip_logs_collection.insert_one({"ip_address": client_ip, "used_free_tier": True})
+                else:
+                    await ip_logs_collection.update_one({"ip_address": client_ip}, {"$set": {"used_free_tier": True}})
+
+        access_token = jwt.encode({"sub": user["google_id"]}, JWT_SECRET, algorithm="HS256")
+        return {"token": access_token, "quota": user["quota"]}
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+
+# ==========================================
+# 支付 API (Stripe & PayPal)
+# ==========================================
+
+@app.post("/api/create-checkout-session")
+async def create_checkout_session(req: PaymentRequest, current_user: dict = Depends(get_current_user)):
+    try:
+        # 确定套餐价格与名称
+        if req.amount == 1:
+            price_cents = 199
+            price_dollars = "1.99"
+            name = "Single Run (1 Mock Interview)"
+        elif req.amount == 5:
+            price_cents = 799
+            price_dollars = "7.99"
+            name = "Pro Pack (5 Mock Interviews)"
+        else:
+            raise HTTPException(status_code=400, detail="Invalid package amount")
+
+        # 处理 Stripe 支付
+        if req.provider == 'stripe':
+            session = stripe.checkout.Session.create(
+                payment_method_types=['card'],
+                line_items=[{
+                    'price_data': {
+                        'currency': 'usd',
+                        'product_data': {'name': name},
+                        'unit_amount': price_cents,
+                    },
+                    'quantity': 1,
+                }],
+                mode='payment',
+                success_url=DOMAIN_URL + '?payment=success',
+                cancel_url=DOMAIN_URL + '?payment=cancel',
+                client_reference_id=current_user["google_id"],
+                metadata={"quota_amount": req.amount}  # Webhook 回调时读取此值
+            )
+            return {"url": session.url}
+
+        # 处理 PayPal 支付
+        elif req.provider == 'paypal':
+            access_token = get_paypal_access_token()
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}"
+            }
+            # 利用 custom_id 透传用户和购买额度信息 (格式: google_id|quota_amount)
+            custom_id = f"{current_user['google_id']}|{req.amount}"
+            
+            order_payload = {
+                "intent": "CAPTURE",
+                "purchase_units": [{
+                    "reference_id": f"mock_interview_{req.amount}",
+                    "custom_id": custom_id,
+                    "description": name,
+                    "amount": {
+                        "currency_code": "USD",
+                        "value": price_dollars
+                    }
+                }],
+                "application_context": {
+                    "return_url": DOMAIN_URL + "?payment=success",
+                    "cancel_url": DOMAIN_URL + "?payment=cancel",
+                    "user_action": "PAY_NOW"
+                }
+            }
+            res = requests.post(f"{PAYPAL_BASE_URL}/v2/checkout/orders", headers=headers, json=order_payload)
+            res.raise_for_status()
+            
+            # 返回 PayPal 的授权跳转链接
+            approve_url = next(link["href"] for link in res.json()["links"] if link["rel"] == "approve")
+            return {"url": approve_url}
+            
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported payment provider")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/webhook/stripe")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        google_id = session.get('client_reference_id')
+        metadata = session.get('metadata', {})
+        quota_to_add = int(metadata.get('quota_amount', 0))
+        
+        if google_id and quota_to_add > 0:
+            await users_collection.update_one(
+                {"google_id": google_id}, 
+                {"$inc": {"quota": quota_to_add}}
+            )
+    return {"status": "success"}
+
+
+@app.post("/api/webhook/paypal")
+async def paypal_webhook(request: Request):
+    event = await request.json()
+    
+    # 监听用户已在 PayPal 端同意付款的事件，后端主动触发扣款(Capture)
+    if event.get("event_type") == "CHECKOUT.ORDER.APPROVED":
+        resource = event.get("resource", {})
+        order_id = resource.get("id")
+        
+        access_token = get_paypal_access_token()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}"
+        }
+        # 主动调用 Capture 捕获这笔资金
+        capture_res = requests.post(f"{PAYPAL_BASE_URL}/v2/checkout/orders/{order_id}/capture", headers=headers)
+        
+        if capture_res.status_code in (200, 201):
+            purchase_units = resource.get("purchase_units", [])
+            if purchase_units:
+                # 解析我们在生成订单时塞进去的 custom_id
+                custom_id = purchase_units[0].get("custom_id", "")
+                if "|" in custom_id:
+                    try:
+                        google_id, quota_str = custom_id.split("|")
+                        quota_to_add = int(quota_str)
+                        await users_collection.update_one(
+                            {"google_id": google_id}, 
+                            {"$inc": {"quota": quota_to_add}}
+                        )
+                    except Exception as e:
+                        print(f"PayPal Custom ID Parse Error: {e}")
+
+    return {"status": "success"}
+
+'''
+# ==========================================
+# 核心功能 API
+# ==========================================
+# '''
 @app.post("/api/tts")
 def text_to_speech(request: TTSRequest):
     try:
@@ -122,8 +376,17 @@ async def parse_resume(request: ParseResumeRequest):
 
 
 @app.post("/api/analyze-resume")
-async def analyze_resume(request: AnalyzeResumeRequest):
+async def analyze_resume(request: AnalyzeResumeRequest, current_user: dict = Depends(get_current_user)):
     """Compare the candidate's profile against the job description and identify key matches and gaps"""
+    
+    if current_user.get("quota", 0) <= 0:
+        raise HTTPException(status_code=403, detail="Not enough quota. Please purchase more.")
+    
+    await users_collection.update_one(
+        {"google_id": current_user["google_id"]}, 
+        {"$inc": {"quota": -1}}
+    )
+    
     prompt = f"""
     Analyze the candidate's profile against the job description.
     Highlight key matches, missing skills, and potential areas to probe during the interview.
