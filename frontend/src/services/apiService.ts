@@ -154,7 +154,6 @@ export async function generateFeedback(
     });
 
     if (!response.ok) {
-      // ⚠️ 修正：复制粘贴的错误提示已修复
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
